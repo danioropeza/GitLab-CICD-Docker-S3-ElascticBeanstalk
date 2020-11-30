@@ -1,0 +1,34 @@
+image: docker:latest
+services:
+    - docker:dind
+
+variables:
+    DOCKER_DRIVER: overlay
+    SPRING_PROFILES_ACTIVE: gitlab-ci
+    USER_GITLAB: fake-user
+    APP_NAME: fake-app-name
+    REPO: fake-repo
+    S3_BUCKET: s3://fake-s3-bucket
+    
+stages:
+    - docker
+    - deploy-s3
+
+docker-build:
+    stage: docker
+    only: 
+        - master
+    script:
+        - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN registry.gitlab.com
+        - docker build --tag registry.gitlab.com/$USER_GITLAB/$REPO:$(date +%d.%m.%Y) --tag registry.gitlab.com/$USER_GITLAB/$REPO:latest .
+        - docker push registry.gitlab.com/$USER_GITLAB/$REPO:$(date +%d.%m.%Y)
+        - docker push registry.gitlab.com/$USER_GITLAB/$REPO:latest
+
+deploy-to-s3-bucket:
+    stage: deploy-s3
+    only: 
+        - master
+    image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+    script:
+        - aws s3 rm $S3_BUCKET --recursive
+        - aws s3 cp ./build $S3_BUCKET --recursive

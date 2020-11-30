@@ -1,0 +1,50 @@
+image: docker:latest
+services:
+    - docker:dind
+
+variables:
+    DOCKER_DRIVER: overlay
+    SPRING_PROFILES_ACTIVE: gitlab-ci
+    USER_GITLAB: fake-user
+    APP_NAME: fake-app-name
+    REPO: fake-repo
+    S3_BUCKET: s3://fake-s3-bucket
+    
+stages:
+    - build
+    - deploy-eb
+    - docker
+
+gradle-build:
+    image: gradle:6.4.1-jdk8
+    stage: build
+    only:
+        - master
+    script: 
+        - chmod +x ./gradlew
+        - ./gradlew build
+    artifacts:
+        paths:
+            - build/libs/*.jar
+
+deploy-to-EB:
+    stage: deploy-eb
+    only:
+        - master
+    image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+    script:
+        - aws s3 rm $S3_BUCKET --recursive
+        - aws s3 cp ./build/libs $S3_BUCKET --recursive
+        - aws elasticbeanstalk create-application-version --application-name fake-backend --version-label
+        fake-backend-source-$(date +%Y.%m.%d.%H:%m) --source-bundle S3Bucket="fake-s3-bucket",S3Key="workersmanagementapi-0.0.1-SNAPSHOT.jar" --auto-create-application
+        - aws elasticbeanstalk update-environment --environment-name FakeBackend-env-1 --version-label fake-backend-source-$(date +%Y.%m.%d.%H:%m)
+
+docker-build:
+    stage: docker
+    only:
+        - master
+    script:
+        - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN registry.gitlab.com
+        - docker build --tag registry.gitlab.com/$USER_GITLAB/$REPO:$(date +%d.%m.%Y) --tag registry.gitlab.com/$USER_GITLAB/$REPO:latest .
+        - docker push registry.gitlab.com/$USER_GITLAB/$REPO:$(date +%d.%m.%Y)
+        - docker push registry.gitlab.com/$USER_GITLAB/$REPO:latest
